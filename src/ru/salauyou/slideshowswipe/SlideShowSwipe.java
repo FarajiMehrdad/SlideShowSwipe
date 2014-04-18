@@ -25,16 +25,23 @@ public class SlideShowSwipe extends View {
 		
 	}
 	
-	private BitmapContainer container;
 	final private SlideShowSwipe self = this;
+	
+	private BitmapContainer container;
 	private Bitmap bitmapFront, bitmapBack;
-	private float deltaX, deltaXPrec, startX;
+	
 	private Rect rectDstBOrig, rectDstFOrig;
 	private Rect rectDstF = new Rect();
 	private Rect rectDstB = new Rect();
 	private Rect rectDimensions = new Rect();
 	private Paint paintAlphaF = new Paint();
 	private Paint paintAlphaB = new Paint();
+	
+	private float deltaX, deltaXPrec, xStart, xStartRaw;
+	private long timeStart;
+	private float v0, vC; // start and calculated velocity
+	private float xC, xCPrec; // start x, calculated x and preceeding calculated x
+	private float kV = 1.5f;	// deceleration coefficient
 	
 	public SlideShowSwipe(Context context) {
 		super(context);
@@ -74,19 +81,34 @@ public class SlideShowSwipe extends View {
 			public boolean onTouch(View v, MotionEvent e) {
 				if (e.getAction() == MotionEvent.ACTION_DOWN){
 				
-					startX = e.getRawX() - deltaX;
+					v0 = 0;
+					vC = 0;
+					
+					xStartRaw = e.getRawX();
+					xStart = e.getRawX() - deltaX;
+					timeStart = System.currentTimeMillis();
 					//Log.d("debug", "Touch down: " + startX);
 					
 				} else if (e.getAction() == MotionEvent.ACTION_MOVE) {
 					
 					deltaXPrec = deltaX;
-					deltaX = e.getRawX() - startX;
+					deltaX = e.getRawX() - xStart;
+					float dt = (float)(System.currentTimeMillis() - timeStart) / 1000f;
+					if (dt > 0){
+						v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
+						xStartRaw = e.getRawX();
+						timeStart = System.currentTimeMillis();
+					}
+
 				    self.invalidate();
-				    //Log.d("debug", "Touch move: " + deltaX);
-					
+				    
 				} else if (e.getAction() == MotionEvent.ACTION_UP){
 					
-					
+					timeStart = System.currentTimeMillis();
+					vC = v0;
+					xCPrec = 0;
+					Log.d("debug", "Start self motion: " + v0);
+					self.invalidate();
 				}
 				return true;
 			}
@@ -119,6 +141,9 @@ public class SlideShowSwipe extends View {
 			makeCalculations(c);
 			c.drawBitmap(bitmapFront, null, rectDstF, paintAlphaF);
 			c.drawBitmap(bitmapBack, null, rectDstB, paintAlphaB);
+			if (v0 != 0 && vC != 0){
+				self.invalidate();
+			}
 		}
 	}
 	
@@ -130,22 +155,35 @@ public class SlideShowSwipe extends View {
 	 */
 	private void makeCalculations(Canvas c){
 		
+		// perform self motion
+		if (v0 != 0 && vC != 0)
+		{
+			float t = (System.currentTimeMillis() - timeStart) / 1000f;
+			vC = -0.5f * v0 * kV * t + v0;
+			xC = -0.25f * v0 * kV * t * t + v0 * t;
+			deltaX += xC - xCPrec;
+			xCPrec = xC;
+			if ((vC < 0 && v0 > 0) || (vC > 0 && v0 < 0)){ // velocity changed sign: stop self motion
+				vC = 0;
+				v0 = 0;
+			}
+		}
+		
 		// normalize deltas if image crossed opposite canvas border
 		while (deltaX > c.getWidth()){
-			startX += c.getWidth();
+			xStart += c.getWidth();
 			deltaXPrec -= c.getWidth();
 			deltaX -= c.getWidth();
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig; 
 		}
 		while (deltaX < - c.getWidth()){
-			startX -= c.getWidth();
+			xStart -= c.getWidth();
 			deltaXPrec += c.getWidth();
 			deltaX += c.getWidth();
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig;
 		}
-		
 		
 		// proceed various movement situations
 		if (deltaXPrec == 0){
