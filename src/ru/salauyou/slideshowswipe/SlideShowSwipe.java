@@ -41,7 +41,11 @@ public class SlideShowSwipe extends View {
 	private long timeStart;
 	private float v0, vC; // start and calculated velocity
 	private float xC, xCPrec; // start x, calculated x and preceeding calculated x
-	private float kV = 1.5f;	// deceleration coefficient
+	
+	private float kVScreen = 4f;	// deceleration coefficient relative to view width
+	private float kV; // deceleration coefficient in px/s^2
+	
+	
 	
 	public SlideShowSwipe(Context context) {
 		super(context);
@@ -58,6 +62,7 @@ public class SlideShowSwipe extends View {
 		setGestureListener();
 	}
 
+	
 	/**
 	 * Sets bitmap container to be controlled by this view
 	 * 
@@ -65,11 +70,11 @@ public class SlideShowSwipe extends View {
 	 * @return	
 	 */
 	public SlideShowSwipe setBitmapContainer(BitmapContainer container){
-		if (container != null){
+		if (container != null)
 			this.container = container;
-		}
 		return this;
 	}
+	
 	
 	/**
 	 * Set gesture listener
@@ -94,7 +99,7 @@ public class SlideShowSwipe extends View {
 					deltaXPrec = deltaX;
 					deltaX = e.getRawX() - xStart;
 					float dt = (float)(System.currentTimeMillis() - timeStart) / 1000f;
-					if (dt > 0){
+					if (dt > 0.02){
 						v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
 						xStartRaw = e.getRawX();
 						timeStart = System.currentTimeMillis();
@@ -107,6 +112,7 @@ public class SlideShowSwipe extends View {
 					timeStart = System.currentTimeMillis();
 					vC = v0;
 					xCPrec = 0;
+					kV = vC > 0 ? Math.abs(kV) : -Math.abs(kV);
 					Log.d("debug", "Start self motion: " + v0);
 					self.invalidate();
 				}
@@ -116,19 +122,30 @@ public class SlideShowSwipe extends View {
 		});
 	}
 	
+	
+	/**
+	 * {@code onSizeChange} override
+	 */
+	@Override
+	protected void onSizeChanged (int w, int h, int oldw, int oldh){
+		super.onSizeChanged(w, h, oldw, oldh);
+		// update dimensions
+		rectDimensions.left = 0;
+		rectDimensions.right = w;
+		rectDimensions.top = 0;
+		rectDimensions.bottom = h;
+		// update decceleration coefficient
+		kV = kVScreen * w;
+	}
+	
+	
 	/**
 	 * {@code onDraw} override
 	 */
 	@Override
 	protected void onDraw(Canvas c){
 		super.onDraw(c);
-		
-		// update dimensions
-		rectDimensions.left = 0;
-		rectDimensions.right = c.getWidth();
-		rectDimensions.top = 0;
-		rectDimensions.bottom = c.getHeight();
-		
+
 		// if nothing is drawn yet
 		if (bitmapFront == null){
 			bitmapFront = container.getBitmapCurrent();
@@ -141,11 +158,11 @@ public class SlideShowSwipe extends View {
 			makeCalculations(c);
 			c.drawBitmap(bitmapFront, null, rectDstF, paintAlphaF);
 			c.drawBitmap(bitmapBack, null, rectDstB, paintAlphaB);
-			if (v0 != 0 && vC != 0){
+			if (v0 != 0 && vC != 0)
 				self.invalidate();
-			}
 		}
 	}
+	
 	
 	/**
 	 * Process calculations of positions at which bitmaps should be drawn, 
@@ -159,8 +176,8 @@ public class SlideShowSwipe extends View {
 		if (v0 != 0 && vC != 0)
 		{
 			float t = (System.currentTimeMillis() - timeStart) / 1000f;
-			vC = -0.5f * v0 * kV * t + v0;
-			xC = -0.25f * v0 * kV * t * t + v0 * t;
+			vC = v0 - kV * t;
+			xC = v0 * t - kV * t * t / 2f;
 			deltaX += xC - xCPrec;
 			xCPrec = xC;
 			if ((vC < 0 && v0 > 0) || (vC > 0 && v0 < 0)){ // velocity changed sign: stop self motion
@@ -197,16 +214,16 @@ public class SlideShowSwipe extends View {
 				rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
 			}
 			rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
+			
 		} else if (deltaX > 0 && deltaXPrec < 0){ // left side of back image crossed left border of view
-        	if (bitmapFront != bitmapBack){
+        	if (bitmapFront != bitmapBack)
         		container.undoGetBitmap();
-        	}
 			bitmapBack = container.getBitmapPrevious();
 			rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
+			
 		} else if (deltaX < 0 && deltaXPrec > 0){ // right side of back image crossed right border of view
-        	if (bitmapFront != bitmapBack){
+        	if (bitmapFront != bitmapBack)
         		container.undoGetBitmap();
-        	}
 			bitmapBack = container.getBitmapNext();
 			rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
 		}
@@ -229,7 +246,6 @@ public class SlideShowSwipe extends View {
 		
 		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / c.getWidth()) ));
 		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / c.getWidth()))));
-		
 	}
 	
 	
@@ -244,8 +260,8 @@ public class SlideShowSwipe extends View {
 	static private Rect calculateRectDst(Bitmap b, Rect d){
 		Rect dst = new Rect();
 		if ((float)b.getWidth()/(float)b.getHeight() < (float)d.width()/(float)d.height()){
-			dst.left = (int)((float)d.width() / 2f + (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
-			dst.right = (int)((float)d.width() / 2f - (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
+			dst.left = (int)((float)d.width() / 2f - (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
+			dst.right = (int)((float)d.width() / 2f + (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
 			dst.top = 0;
 			dst.bottom = d.height();
 		} else {
