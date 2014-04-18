@@ -1,7 +1,7 @@
 SlideShowSwipe [In progress]
 ==============
 
-[Draft] [In progress] Slide show with gesture control -- Android custom view
+[Draft] [In progress] Slide show with swipe support -- Android custom view
 
 The task is to create slide show in connection with mutable image container. It means that images doesn't form fixed list there--they can be added into any position of container and can be rearranged at any time--and the view isn't allowed to appear broken or demonstrate any kind of abnormal behavior.
 
