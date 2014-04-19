@@ -53,7 +53,7 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		if (posCurrent >= container.size()){
 			posCurrent = 0;
 		}
-		Log.d("debug", "Got next: " + posCurrent);
+		//Log.d("debug", "Got next: " + posCurrent);
 		return container.get(posCurrent);
 	}
 
@@ -64,20 +64,20 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		if (posCurrent < 0){
 			posCurrent = container.size() - 1;
 		}
-		Log.d("debug", "Got previous: " + posCurrent);
+		//Log.d("debug", "Got previous: " + posCurrent);
 		return container.get(posCurrent);
 	}
 
 	@Override
 	public Bitmap getBitmapCurrent() {
-		Log.d("debug", "Got current: " + posCurrent);
+		//Log.d("debug", "Got current: " + posCurrent);
 		return container.get(posCurrent);
 	}
 
 	@Override
 	public void undoGetBitmap() {
 		posCurrent = posPrec;
-		Log.d("debug", "Undid: " + posCurrent);
+		//Log.d("debug", "Undid: " + posCurrent);
 	}
 
 }

@@ -37,6 +37,8 @@ public class SlideShowSwipe extends View {
 	private Paint paintAlphaF = new Paint();
 	private Paint paintAlphaB = new Paint();
 	
+	private boolean started = false;
+	private boolean startedMove = false;
 	private float deltaX, deltaXPrec, xStart, xStartRaw;
 	private long timeStart;
 	private float v0, vC; // start and calculated velocity
@@ -96,24 +98,74 @@ public class SlideShowSwipe extends View {
 					
 				} else if (e.getAction() == MotionEvent.ACTION_MOVE) {
 					
-					deltaXPrec = deltaX;
 					deltaX = e.getRawX() - xStart;
 					float dt = (float)(System.currentTimeMillis() - timeStart) / 1000f;
+					
+					// threshold to avoid very small dt 
 					if (dt > 0.02){
 						v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
 						xStartRaw = e.getRawX();
 						timeStart = System.currentTimeMillis();
+						Log.d("debug", "v0: " + v0);
 					}
-
+					
 				    self.invalidate();
 				    
 				} else if (e.getAction() == MotionEvent.ACTION_UP){
 					
 					timeStart = System.currentTimeMillis();
-					vC = v0;
+
+					// correct deceleration coefficient sign
+					kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
+					
+					// correct start velocity
+					// calculate the x point where self motion will stop
+					double xEnd = v0 * v0 / 2f / kV;
+					
+					// swipe not strong enough to launch motion
+					if (Math.abs(xEnd) < rectDimensions.width() / 2){ 
+						
+						// but strong enough to switch photo?
+						boolean strong = Math.abs(xEnd) >= rectDimensions.width() / 4; 
+						float w = rectDimensions.width();
+						
+						if (deltaX >= 0 && deltaX < w / 2 ){
+							if (strong){
+								xEnd = w - deltaX;
+								v0 = +1;
+							} else {
+								xEnd = -deltaX;
+								v0 = -1;				
+							}
+						} else if (deltaX < 0 && deltaX > -w / 2){
+							if (strong){
+								xEnd = w + deltaX;
+								v0 = -1;
+							} else {
+								xEnd = -deltaX;
+								v0 = +1;
+							}
+						} else if (deltaX >= 0 && deltaX >= w / 2){
+							xEnd = w - deltaX;
+							v0 = +1;		
+						} else if (deltaX < 0 && deltaX < -w / 2){						
+							xEnd = -w - deltaX;
+							v0 = -1;						
+						} 
+						
+					} else {
+						// correct ending point such that motion will stop when full image is displayed
+						xEnd = Math.round((xEnd + deltaX)/rectDimensions.width()) * rectDimensions.width() - deltaX;
+					}
+					
+					// correct deceleration coefficient sign
+					kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
+					
+					// calculate corrected velocity 
+					v0 = Math.signum(v0) * (float) Math.sqrt(Math.abs(2.0 * kV * xEnd));
+			        vC = v0;
 					xCPrec = 0;
-					kV = vC > 0 ? Math.abs(kV) : -Math.abs(kV);
-					Log.d("debug", "Start self motion: " + v0);
+					
 					self.invalidate();
 				}
 				return true;
@@ -146,10 +198,9 @@ public class SlideShowSwipe extends View {
 	protected void onDraw(Canvas c){
 		super.onDraw(c);
 
-		// if nothing is drawn yet
-		if (bitmapFront == null){
+		if (bitmapFront == null){  // if nothing is drawn yet
 			bitmapFront = container.getBitmapCurrent();
-			bitmapBack = container.getBitmapCurrent();
+			bitmapBack = bitmapFront;
 			if (bitmapFront != null){
 				 makeCalculations(c);
 			     c.drawBitmap(bitmapFront, null, rectDstF, null);	
@@ -187,14 +238,14 @@ public class SlideShowSwipe extends View {
 		}
 		
 		// normalize deltas if image crossed opposite canvas border
-		while (deltaX > c.getWidth()){
+		while (deltaX >= c.getWidth()){
 			xStart += c.getWidth();
 			deltaXPrec -= c.getWidth();
 			deltaX -= c.getWidth();
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig; 
 		}
-		while (deltaX < - c.getWidth()){
+		while (deltaX < -c.getWidth()){
 			xStart -= c.getWidth();
 			deltaXPrec += c.getWidth();
 			deltaX += c.getWidth();
@@ -203,25 +254,30 @@ public class SlideShowSwipe extends View {
 		}
 		
 		// proceed various movement situations
-		if (deltaXPrec == 0){
-			if (deltaX == 0){  
-				rectDstFOrig = calculateRectDst(bitmapFront, rectDimensions);
-			} else if (deltaX > 0){ // started moving
+		if (!started){
+			rectDstFOrig = calculateRectDst(bitmapFront, rectDimensions);
+			rectDstBOrig = rectDstFOrig;
+			started = true;
+		}
+		if (!startedMove){
+			if (deltaX > 0){
 				bitmapBack = container.getBitmapPrevious();
 				rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
-			} else if (deltaX < 0) {
+				startedMove = true;
+			} else if (deltaX < 0){
 				bitmapBack = container.getBitmapNext();
 				rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
+				startedMove = true;
 			}
-			rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
-			
-		} else if (deltaX > 0 && deltaXPrec < 0){ // left side of back image crossed left border of view
+		}
+		
+		if (deltaX >= 0 && deltaXPrec < 0){ // left side of back image crossed left border of view
         	if (bitmapFront != bitmapBack)
         		container.undoGetBitmap();
 			bitmapBack = container.getBitmapPrevious();
 			rectDstBOrig = calculateRectDst(bitmapBack, rectDimensions);
 			
-		} else if (deltaX < 0 && deltaXPrec > 0){ // right side of back image crossed right border of view
+		} else if (deltaX < 0 && deltaXPrec >= 0){ // right side of back image crossed right border of view
         	if (bitmapFront != bitmapBack)
         		container.undoGetBitmap();
 			bitmapBack = container.getBitmapNext();
