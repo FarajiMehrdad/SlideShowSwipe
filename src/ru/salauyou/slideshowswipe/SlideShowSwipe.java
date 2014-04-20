@@ -197,7 +197,7 @@ public class SlideShowSwipe extends View {
 						v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
 						xStartRaw = e.getRawX();
 						timeStart = System.currentTimeMillis();
-						Log.d("debug", "v0: " + v0);
+						//Log.d("debug", "v0: " + v0);
 					}
 					
 				    self.invalidate();
@@ -357,11 +357,13 @@ public class SlideShowSwipe extends View {
 			// velocity changed sign: stop self motion
 			if ((vC < 0 && v0 > 0) || (vC > 0 && v0 < 0)){ 
 	
-				// if image didn't reach opposite edge of view 
-				if (v0 < 0 && deltaX < -c.getWidth() / 2 && deltaX > -c.getWidth()){
+				// correct image position on motion stop
+				if (v0 < 0 && deltaX < -0.5 * c.getWidth() && deltaX > -1.5 * c.getWidth()){
 					deltaX = -c.getWidth();
-				} else if (v0 > 0 && deltaX > c.getWidth() / 2 && deltaX < c.getWidth()){
+					deltaXPrec = -c.getWidth();
+				} else if (v0 > 0 && deltaX > 0.5 * c.getWidth() && deltaX < 1.5 * c.getWidth()){
 					deltaX = c.getWidth();
+					deltaXPrec = c.getWidth();
 				} else {
 					deltaX = 0;
 					deltaXPrec = 0;
@@ -397,7 +399,6 @@ public class SlideShowSwipe extends View {
 			container.undoGetBitmap();
 			bitmapBack = bitmapFront;
 			rectDstBOrig = rectDstFOrig;
-			bitmapChanged();
 		}
 		
 
@@ -452,6 +453,7 @@ public class SlideShowSwipe extends View {
 	 */
 	private void stateChanged(State s){
 		if (s != stateCurrent){
+			Log.d("debug", "State changed: " + s);
 			stateCurrent = s;
 			if (stateChangeListener != null)
 				stateChangeListener.onStateChange(s);
@@ -462,6 +464,7 @@ public class SlideShowSwipe extends View {
 	 * Notify that current displaying bitmap was changed
 	 */
 	private void bitmapChanged(){
+		Log.d("debug", "Bitmap changed");
 		if (stateChangeListener != null)
 			stateChangeListener.onCurrentBitmapChange();
 	}
