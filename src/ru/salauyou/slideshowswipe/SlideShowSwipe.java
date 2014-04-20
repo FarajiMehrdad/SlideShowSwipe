@@ -254,7 +254,7 @@ public class SlideShowSwipe extends View {
 					
 					// calculate corrected velocity 
 					v0 = Math.signum(v0) * (float) Math.sqrt(Math.abs(2.0 * kV * xEnd));
-			        vC = v0;
+					vC = v0;
 					xCPrec = 0;
 					
 					stateChanged(State.RELEASED);
@@ -434,12 +434,13 @@ public class SlideShowSwipe extends View {
 			rectDstB.right = (int)deltaX - rectDstBOrig.left;
 			rectDstB.top = rectDstBOrig.top;
 			rectDstB.bottom = rectDstBOrig.bottom;
+			if (deltaX < 0){
+				rectDstB.left += 2 * c.getWidth();
+				rectDstB.right += 2 * c.getWidth();
+			} 
 		}
 			
-		if (deltaX < 0){
-			rectDstB.left += 2 * c.getWidth();
-			rectDstB.right += 2 * c.getWidth();
-		} 
+		
 		
 		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / c.getWidth()) ));
 		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / c.getWidth()))));
