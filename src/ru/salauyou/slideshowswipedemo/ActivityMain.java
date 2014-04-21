@@ -10,7 +10,10 @@ import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
+import android.view.View;
+import android.view.View.OnClickListener;
 import android.widget.ImageView;
 
 public class ActivityMain extends Activity implements SlideShowSwipe.BitmapContainer, SlideShowSwipe.OnStateChangeListener {
@@ -23,16 +26,14 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 	int posCurrent = 0;
 	int posPrec = 0;
 	
+	
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 		
-		slideShow = (SlideShowSwipe)findViewById(R.id.slide_show);
-		slideShow.setBitmapContainer(this);
-		
 		viewControl = (ImageView)findViewById(R.id.view_control);
-		slideShow.setOnStateChangeListener(this);
+		
 		
 		container = new ArrayList<Bitmap>();
 		container.add(BitmapFactory.decodeResource(this.getResources(), R.drawable.img01));
@@ -42,7 +43,22 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		container.add(BitmapFactory.decodeResource(this.getResources(), R.drawable.img05));
 		container.add(BitmapFactory.decodeResource(this.getResources(), R.drawable.img06));
 		container.add(BitmapFactory.decodeResource(this.getResources(), R.drawable.img07));
+		
+		slideShow = (SlideShowSwipe)findViewById(R.id.slide_show);
+		slideShow.setOnStateChangeListener(this)
+			.setBitmapContainer(this)
+			.setSlideShowPeriod(1000)
+			.setSlideShowTransition(300)
+			.startSlideShow();
         
+		
+		
+		viewControl.setOnClickListener(new OnClickListener(){
+			@Override
+			public void onClick(View v) {
+				
+			}
+		});
 		
 	}
 
@@ -61,15 +77,11 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 	public Bitmap getBitmapNext() {
 		posPrec = posCurrent;
 		
-		/*
 		posCurrent ++;
 		if (posCurrent >= container.size()){
 			posCurrent = 0;
-		}*/
-		
-		while (posCurrent == posPrec)  // random to simulate mutation
-			posCurrent = rnd.nextInt(container.size());
-		
+		}
+
 		return container.get(posCurrent);
 	}
 
@@ -77,14 +89,10 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 	public Bitmap getBitmapPrevious() {
 		posPrec = posCurrent;
 	
-		/*
 		posCurrent --;
 		if (posCurrent < 0){
 			posCurrent = container.size() - 1;
-		}*/
-		
-		while (posCurrent == posPrec)   // random to simulate mutation
-			posCurrent = rnd.nextInt(container.size());  
+		}
 		
 		return container.get(posCurrent);
 	}
@@ -104,8 +112,14 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 	
 	
 	@Override
-	public void onStateChange(State state) {
-		//viewControl.setImageBitmap(this.getBitmapCurrent());
+	public void onStateChange(State s) {
+		switch (s){
+		case SLIDESHOW_PAUSED :
+		case SLIDESHOW_STARTED :
+		case NEXT_SLIDE :
+			Log.d("debug", s.toString());
+			break;
+		}
 	}
 
 	@Override

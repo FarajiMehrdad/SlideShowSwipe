@@ -1,10 +1,18 @@
 package ru.salauyou.slideshowswipe;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.os.Handler;
+import android.os.Message;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -71,39 +79,66 @@ public class SlideShowSwipe extends View {
 	/**
 	 * Possible states of the view
 	 */
-	public enum State{
-		STOPPED, TOUCHED, RELEASED, NEXT_SLIDE; 
+	public enum State{ 
+		RESET, 
+		SLIDESHOW_STARTED, NEXT_SLIDE, SLIDESHOW_PAUSED, 
+		TOUCH_STARTED, TOUCH_RELEASED, 
+		MOTION_STARTED, MOTION_STOPPED; 
 	}
 	
 	final private SlideShowSwipe self = this;
 	
 	private BitmapContainer container;
-	private Bitmap bitmapFront, bitmapBack;
+	private Bitmap bitmapFront, bitmapBack, bitmapPrec;
 	
-	private State stateCurrent = State.STOPPED;
+	private State stateCurrent = State.RESET;
 	private OnStateChangeListener stateChangeListener;
 	
-	private Rect rectDstBOrig, rectDstFOrig;
-	private Rect rectDstF = new Rect();
-	private Rect rectDstB = new Rect();
+	private Rect rectDstBOrig, rectDstFOrig, rectDstPOrig;
+	
+	private Rect rectDstF = new Rect(); // destination rect of 'front' bitmap (i. e. current)
+	private Rect rectDstB = new Rect(); // destination rect of 'back' bitmap (i. e. that which is partially viewed on swipe)
+	private Rect rectDstP = new Rect(); // destination rect of 'preceding' bitmap (i. e. that which fades out during slideshow transition)
+	
 	private Rect rectDimensions = new Rect();
+	
 	private Paint paintAlphaF = new Paint();
 	private Paint paintAlphaB = new Paint();
+	private Paint paintAlphaP = new Paint();
 	
-	private boolean started = false;
-	private boolean startedMove = false;
-	private float deltaX, deltaXPrec, xStart, xStartRaw;
-	private long timeStart;
+	private volatile boolean firstBitmapRequested = false;
+	
+	private boolean started = false; // indicates if slide show was started (i. e. bitmaps != null)
+	private boolean startedMove = false; // indicates if some touch movement already occured
+	private float deltaX, deltaXPrec, xStart, xStartRaw, yStartRaw;
+	private long timeTouchStart;
 	private float v0, vC; // start and calculated velocity
 	private float xC, xCPrec; // start x, calculated x and preceeding calculated x
 	
 	private float kVScreen = 4f;	// deceleration coefficient relative to view width
 	private float kV; // deceleration coefficient in px/s^2
 	
+	private float touchMoveThresholdScreen = 0.03f; // size of maximum movement to be threated as click, in screen width 
+	private float touchMoveThreshold; // the same in pixels
+	private long touchTimeThreshold = 200;
+	
+	
 	private boolean undoAtZero = false;
 	
+	static public long PERIOD_DEFAULT = 1500L;
+	static public long TRANSITION_DEFAULT = 500L;
 	
-
+	private long period = PERIOD_DEFAULT;
+	private long transition = TRANSITION_DEFAULT;
+	
+    private boolean paused = true;
+    private boolean pausedManually = true;
+	
+    private volatile AtomicLong timeTransitionStart = new AtomicLong(-1);
+	
+    private ExecutorService scheduler;
+    
+    
 	/* ===================== Publc methods ====================== */
 	
 	/**
@@ -146,6 +181,61 @@ public class SlideShowSwipe extends View {
 		return this.stateCurrent;
 	}
 	
+	/**
+	 * Sets period of demonstration of every slide in slideshow
+	 * 
+	 * @param period	period in ms. If {@code period <= 0}, is set to default (1500 ms)
+	 * @return
+	 */
+	public SlideShowSwipe setSlideShowPeriod(long period){
+		if (period <= 0)
+			this.period = PERIOD_DEFAULT;
+		else
+			this.period = period;
+		transition = Math.min(transition, this.period / 2);
+		return this;
+	}
+	
+	/**
+	 * Sets duration of transition between slides
+	 * 
+	 * @param duration duration in ms. If exceeds one half of slideshow period, replaced 
+	 * by one half of slideshow period. If {@code duration < 0}, is set to default (300 ms)
+	 * @return
+	 */
+	public SlideShowSwipe setSlideShowTransition(long transition){
+		if (transition < 0)
+			this.transition = Math.min(TRANSITION_DEFAULT, this.period / 2);
+		else if (transition > this.period / 2)
+			this.transition = this.period / 2;
+		else
+			this.transition = transition;
+		
+		return this;
+	}
+	
+	/**
+	 * Starts or unpauses slideshow
+	 */
+	public void startSlideShow(){
+		if (pausedManually){
+			pausedManually = false;
+			this.invalidate();
+		}
+	}
+	
+	/**
+	 * Forces slideshow to pause. Clicks on the view will not unpause slideshow
+	 * until {@code startSlideShow()} is invoked
+	 */
+	public void pauseSlideShow(){
+		if (!pausedManually){
+			pausedManually = true;
+			pause();
+		}
+	}
+	
+	
 	
 	
 	/* ============== Constructors inherited from View ================ */
@@ -174,6 +264,10 @@ public class SlideShowSwipe extends View {
 	private void setGestureListener(){
 		this.setOnTouchListener(new OnTouchListener(){
 			
+			boolean pausedNow = false;
+			long timeStartRaw;
+			float touchPath;
+			
 			@Override
 			public boolean onTouch(View v, MotionEvent e) {
 				if (e.getAction() == MotionEvent.ACTION_DOWN){
@@ -182,29 +276,41 @@ public class SlideShowSwipe extends View {
 					vC = 0;
 					
 					xStartRaw = e.getRawX();
-					xStart = e.getRawX() - deltaX;
-					timeStart = System.currentTimeMillis();
+					yStartRaw = e.getRawY();
 					
-					stateChanged(State.TOUCHED);
+					xStart = e.getRawX() - deltaX;
+					timeTouchStart = timeStartRaw = System.currentTimeMillis();
+					
+					touchPath = 0;
+					
+					// pause slideshow if needed
+					if (!paused && !pausedManually){
+						pause();
+						pausedNow = true;
+					}
+						
+					stateChanged(State.TOUCH_STARTED);
 					
 				} else if (e.getAction() == MotionEvent.ACTION_MOVE) {
-					
+				
 					deltaX = e.getRawX() - xStart;
-					float dt = (float)(System.currentTimeMillis() - timeStart) / 1000f;
+					float dt = (float)(System.currentTimeMillis() - timeTouchStart) / 1000f;
 					
 					// threshold to avoid very small dt 
 					if (dt > 0.02){
 						v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
 						xStartRaw = e.getRawX();
-						timeStart = System.currentTimeMillis();
-						//Log.d("debug", "v0: " + v0);
+						timeTouchStart = System.currentTimeMillis();
 					}
+					
+					// calculate path of touch--this is needed to recognize clicks
+					touchPath += Math.hypot(e.getRawX() - xStartRaw, e.getRawY() - yStartRaw);
 					
 				    self.invalidate();
 				    
 				} else if (e.getAction() == MotionEvent.ACTION_UP){
 					
-					timeStart = System.currentTimeMillis();
+					timeTouchStart = System.currentTimeMillis();
 					
 					// correct deceleration coefficient sign
 					kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
@@ -257,7 +363,16 @@ public class SlideShowSwipe extends View {
 					vC = v0;
 					xCPrec = 0;
 					
-					stateChanged(State.RELEASED);
+					stateChanged(State.TOUCH_RELEASED);
+					stateChanged(State.MOTION_STARTED);
+					
+					// small movement treated as touch unpauses slideshow
+					if (touchPath <= touchMoveThreshold && !pausedManually && paused && !pausedNow
+							&& System.currentTimeMillis() - timeStartRaw <= touchTimeThreshold)			
+						unPause();
+					else 
+						pausedNow = false;
+					
 					
 					self.invalidate();
 				}
@@ -266,6 +381,7 @@ public class SlideShowSwipe extends View {
 
 		});
 	}
+	
 	
 	
 	/**
@@ -283,7 +399,11 @@ public class SlideShowSwipe extends View {
 		
 		// update decceleration coefficient
 		kV = kVScreen * w;
+		
+		// update move/click threshold
+		touchMoveThreshold = touchMoveThresholdScreen * Math.min(w, h);
 	}
+	
 	
 	
 	/**
@@ -293,23 +413,130 @@ public class SlideShowSwipe extends View {
 	protected void onDraw(Canvas c){
 		super.onDraw(c);
 
-		// if nothing is drawn yet
+		// if view just created or reset
 		if (!started){  
-			bitmapFront = container.getBitmapCurrent();
-			bitmapBack = bitmapFront;
-			makeCalculations(c);
-		    if (bitmapFront != null)
-		    	c.drawBitmap(bitmapFront, null, rectDstF, null);	
+			if (bitmapFront == null){
+				if (!firstBitmapRequested){
+					getFirstBitmap();
+					firstBitmapRequested = true;
+				}
+			} else {
+				if (!pausedManually){
+					unPause();
+				}
+			}
 		} else {
-			makeCalculations(c);
-			if (bitmapFront != null)
-				c.drawBitmap(bitmapFront, null, rectDstF, paintAlphaF);
+			makeCalculations();
 			if (bitmapBack != null)
 				c.drawBitmap(bitmapBack, null, rectDstB, paintAlphaB);
-			if (v0 != 0 && vC != 0)
+			if (timeTransitionStart.get() > 0 && bitmapPrec != null)
+				c.drawBitmap(bitmapPrec, null, rectDstP, paintAlphaP);
+			if (bitmapFront != null)
+				c.drawBitmap(bitmapFront, null, rectDstF, paintAlphaF);
+			if ((v0 != 0 && vC != 0) || timeTransitionStart.get() > 0)
 				self.invalidate();
 		}
 	}
+	
+	
+	
+	/**
+	 * Runs new thread to get the first non-null bitmap from the container
+	 */
+	private void getFirstBitmap(){
+
+		if (container.getBitmapCurrent() == null){
+			
+			// launch executor service to perform attempts to get current bitmap
+			final ExecutorService e = Executors.newScheduledThreadPool(1);
+			
+			final Handler h = new Handler(){
+				@Override
+				public void handleMessage(Message m){
+					bitmapFront = container.getBitmapCurrent();
+					self.invalidate();
+				}
+			};
+			
+			((ScheduledExecutorService) e).scheduleAtFixedRate(new Runnable(){
+				@Override
+				public void run() {
+					if (container.getBitmapCurrent() != null){
+						h.sendEmptyMessage(1);
+						e.shutdownNow();
+					}
+				}
+			}, 150, 150, TimeUnit.MILLISECONDS);
+
+		} else {
+			bitmapFront = container.getBitmapCurrent();
+			self.invalidate();
+		}
+	}
+	
+	
+	
+	/**
+	 * Pauses slide show
+	 */
+	private void pause(){
+		if (!paused && scheduler != null){
+			paused = true;
+			((ScheduledExecutorService)scheduler).shutdown();
+			scheduler = null;
+		}
+		if (!pausedManually || !paused)
+			stateChanged(State.SLIDESHOW_PAUSED);
+	}
+	
+	
+	
+	/**
+	 * Unpauses slide show and launches transition
+	 */
+	private void unPause(){
+		
+		if (paused || pausedManually){
+			
+			final Handler h = new Handler(){
+				@Override
+				public void handleMessage(Message m){
+					
+					timeTransitionStart.set(System.currentTimeMillis());
+					bitmapPrec = bitmapFront;
+					rectDstPOrig = rectDstFOrig;
+					bitmapFront = container.getBitmapNext();
+					bitmapBack = bitmapFront;
+					bitmapChanged();
+					if (bitmapFront != null)
+						rectDstBOrig = rectDstFOrig = calculateRectDst(bitmapFront, rectDimensions);
+					makeCalculations();
+					
+					self.invalidate();
+					
+					stateChanged(State.NEXT_SLIDE);
+				}
+			};
+		
+			long p = bitmapPrec == null ? 0 : period;
+
+			// timer that performs slide changes
+			scheduler = Executors.newScheduledThreadPool(1);
+			((ScheduledExecutorService)scheduler).scheduleAtFixedRate(new Runnable(){
+				@Override
+				public void run() {
+					h.sendEmptyMessage(1);
+				}
+			}, p, period, TimeUnit.MILLISECONDS);
+			
+			paused = false;
+			stateChanged(State.SLIDESHOW_STARTED);
+			
+			self.invalidate();
+		}
+		
+	}
+	
 	
 	
 	/**
@@ -318,7 +545,7 @@ public class SlideShowSwipe extends View {
 	 * 
 	 * @param c		Canvas 
 	 */
-	private void makeCalculations(Canvas c){
+	private void makeCalculations(){
 		
 		// first call
 		if (!started){
@@ -348,7 +575,7 @@ public class SlideShowSwipe extends View {
 		// perform self motion
 		if (v0 != 0 && vC != 0)
 		{
-			float t = (System.currentTimeMillis() - timeStart) / 1000f;
+			float t = (System.currentTimeMillis() - timeTouchStart) / 1000f;
 			vC = v0 - kV * t;
 			xC = v0 * t - kV * t * t / 2f;
 			deltaX += xC - xCPrec;
@@ -358,36 +585,36 @@ public class SlideShowSwipe extends View {
 			if ((vC < 0 && v0 > 0) || (vC > 0 && v0 < 0)){ 
 	
 				// correct image position on motion stop
-				if (v0 < 0 && deltaX < -0.5 * c.getWidth() && deltaX > -1.5 * c.getWidth()){
-					deltaX = -c.getWidth();
-					deltaXPrec = -c.getWidth();
-				} else if (v0 > 0 && deltaX > 0.5 * c.getWidth() && deltaX < 1.5 * c.getWidth()){
-					deltaX = c.getWidth();
-					deltaXPrec = c.getWidth();
+				if (v0 < 0 && deltaX < -0.5 * rectDimensions.width() && deltaX > -1.5 * rectDimensions.width()){
+					deltaX = -rectDimensions.width();
+					deltaXPrec = -rectDimensions.width();
+				} else if (v0 > 0 && deltaX > 0.5 * rectDimensions.width() && deltaX < 1.5 * rectDimensions.width()){
+					deltaX = rectDimensions.width();
+					deltaXPrec = rectDimensions.width();
 				} else {
 					deltaX = 0;
 					deltaXPrec = 0;
 				}
 				vC = 0;
 				v0 = 0;
-				stateChanged(State.STOPPED);
+				stateChanged(State.MOTION_STOPPED);
 			}
 		}
 		
 		// normalize deltas if image crossed opposite canvas border
-		while (deltaX >= c.getWidth()){
-			xStart += c.getWidth();
-			deltaXPrec -= c.getWidth();
-			deltaX -= c.getWidth();
+		while (deltaX >= rectDimensions.width()){
+			xStart += rectDimensions.width();
+			deltaXPrec -= rectDimensions.width();
+			deltaX -= rectDimensions.width();
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig; 
 			undoAtZero = false;
 			bitmapChanged();
 		} 
-		while (deltaX <= -c.getWidth()){
-			xStart -= c.getWidth();
-			deltaXPrec += c.getWidth();
-			deltaX += c.getWidth();
+		while (deltaX <= -rectDimensions.width()){
+			xStart -= rectDimensions.width();
+			deltaXPrec += rectDimensions.width();
+			deltaX += rectDimensions.width();
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig;
 			undoAtZero = false;
@@ -399,6 +626,7 @@ public class SlideShowSwipe extends View {
 			container.undoGetBitmap();
 			bitmapBack = bitmapFront;
 			rectDstBOrig = rectDstFOrig;
+			undoAtZero = false;
 		}
 		
 
@@ -430,44 +658,68 @@ public class SlideShowSwipe extends View {
 			rectDstF.bottom = rectDstFOrig.bottom; 
 		}
 		
+		if (rectDstPOrig != null && timeTransitionStart.get() > 0){
+			rectDstP.left = rectDstPOrig.left + (int)deltaX;
+			rectDstP.top = rectDstPOrig.top;
+			rectDstP.right = rectDstPOrig.right + (int)deltaX;
+			rectDstP.bottom = rectDstPOrig.bottom; 
+		}
+		
 		if (rectDstBOrig != null){
 			rectDstB.left = (int)deltaX - rectDstBOrig.right;
 			rectDstB.right = (int)deltaX - rectDstBOrig.left;
 			rectDstB.top = rectDstBOrig.top;
 			rectDstB.bottom = rectDstBOrig.bottom;
 			if (deltaX < 0){
-				rectDstB.left += 2 * c.getWidth();
-				rectDstB.right += 2 * c.getWidth();
+				rectDstB.left += 2 * rectDimensions.width();
+				rectDstB.right += 2 * rectDimensions.width();
 			} 
 		}
 			
+
+		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / rectDimensions.width())));
+		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / rectDimensions.width()))));
 		
+		// calculate transparencies on transition
+		long tStart = timeTransitionStart.get();
+		if (tStart > 0){
+			long t = System.currentTimeMillis();
+			float a = (float)(t - tStart) / (float)transition;
+			if (a > 1f)
+				a = 1f;
+			paintAlphaP.setAlpha((int) ((float)paintAlphaF.getAlpha() * (1f - a)));
+			paintAlphaF.setAlpha((int) ((float)paintAlphaF.getAlpha() * a));
+			
+			if (t >= tStart + transition)
+				timeTransitionStart.set(-1);
+		}
 		
-		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / c.getWidth()) ));
-		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / c.getWidth()))));
 	}
 	
+
 	
 	/**
 	 *	Set current state to changed and perform listener callback 
 	 */
 	private void stateChanged(State s){
-		if (s != stateCurrent){
-			Log.d("debug", "State changed: " + s);
+		if (s != stateCurrent || s == State.NEXT_SLIDE){
 			stateCurrent = s;
 			if (stateChangeListener != null)
 				stateChangeListener.onStateChange(s);
 		}
 	}
 	
+	
+	
 	/**
 	 * Notify that current displaying bitmap was changed
 	 */
 	private void bitmapChanged(){
-		Log.d("debug", "Bitmap changed");
 		if (stateChangeListener != null)
 			stateChangeListener.onCurrentBitmapChange();
 	}
+	
+	
 	
 	/**
 	 * Returns rectangle that contains position of a given bitmap in coordinates of destination 
@@ -498,5 +750,38 @@ public class SlideShowSwipe extends View {
 		}
 		return dst;
 	}
+	
+	
+	/*
+	 * Resets bitmaps, rects and values
+	 
+	private void reset(){
+		started = false;
+		startedMove = false;
+				
+		rectDstBOrig = null;
+		rectDstFOrig = null;
+		rectDstPOrig = null;
+		bitmapFront = null;
+		bitmapBack = null;
+		bitmapPrec = null;
+		
+		undoAtZero = false;
+
+		v0 = 0;
+		vC = 0;
+		deltaX = 0;
+		deltaXPrec = 0;
+		
+		firstBitmapRequested = true;
+		pausedManually = true;
+		
+		timeTransitionStart.set(-1);
+		
+		stateChanged(State.RESET);
+		
+		this.invalidate();
+	}*/
+	
 	
 }
