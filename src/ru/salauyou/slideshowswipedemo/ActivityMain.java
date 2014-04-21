@@ -46,8 +46,8 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		((SlideShowSwipe)findViewById(R.id.slide_show))
 			.setOnStateChangeListener(this)
 			.setBitmapContainer(this)
-			.setSlideShowPeriod(1000)
-			.setSlideShowTransition(300)
+			.setSlideShowPeriod(1200)
+			.setSlideShowTransition(600)
 			.startSlideShow();
 
 		

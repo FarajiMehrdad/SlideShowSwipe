@@ -14,7 +14,6 @@ import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -122,7 +121,6 @@ public class SlideShowSwipe extends View {
 	private float touchMoveThreshold; // the same in pixels
 	private long touchTimeThreshold = 200;
 	
-	
 	private boolean undoAtZero = false;
 	
 	static public long PERIOD_DEFAULT = 1500L;
@@ -131,8 +129,8 @@ public class SlideShowSwipe extends View {
 	private long period = PERIOD_DEFAULT;
 	private long transition = TRANSITION_DEFAULT;
 	
-    private boolean paused = true;
-    private boolean pausedManually = true;
+	private boolean paused = true;
+	private boolean pausedManually = true;
 	
     private volatile AtomicLong timeTransitionStart = new AtomicLong(-1);
 	
@@ -352,7 +350,8 @@ public class SlideShowSwipe extends View {
 						
 					} else {
 						// correct ending point such that motion will stop when full image is displayed
-						xEnd = Math.round((xEnd + deltaX)/rectDimensions.width()) * rectDimensions.width() - deltaX;
+						xEnd = Math.round((xEnd + deltaX)/rectDimensions.width()) 
+								* rectDimensions.width() - deltaX;
 					}
 					
 					// correct deceleration coefficient sign
@@ -373,12 +372,11 @@ public class SlideShowSwipe extends View {
 					else 
 						pausedNow = false;
 					
-					
 					self.invalidate();
 				}
 				return true;
 			}
-
+			
 		});
 	}
 	
@@ -501,8 +499,6 @@ public class SlideShowSwipe extends View {
 			final Handler h = new Handler(){
 				@Override
 				public void handleMessage(Message m){
-					
-					timeTransitionStart.set(System.currentTimeMillis());
 					bitmapPrec = bitmapFront;
 					rectDstPOrig = rectDstFOrig;
 					bitmapFront = container.getBitmapNext();
@@ -512,9 +508,9 @@ public class SlideShowSwipe extends View {
 						rectDstBOrig = rectDstFOrig = calculateRectDst(bitmapFront, rectDimensions);
 					makeCalculations();
 					
-					self.invalidate();
-					
 					stateChanged(State.NEXT_SLIDE);
+					
+					self.invalidate();
 				}
 			};
 		
@@ -525,6 +521,7 @@ public class SlideShowSwipe extends View {
 			((ScheduledExecutorService)scheduler).scheduleAtFixedRate(new Runnable(){
 				@Override
 				public void run() {
+					timeTransitionStart.set(System.currentTimeMillis());
 					h.sendEmptyMessage(1);
 				}
 			}, p, period, TimeUnit.MILLISECONDS);
@@ -541,9 +538,7 @@ public class SlideShowSwipe extends View {
 	
 	/**
 	 * Process calculations of positions at which bitmaps should be drawn, 
-	 * depending on swipe and slideshow status
-	 * 
-	 * @param c		Canvas 
+	 * depending on swipe and transition between bitmaps
 	 */
 	private void makeCalculations(){
 		
@@ -570,8 +565,9 @@ public class SlideShowSwipe extends View {
 				startedMove = true;
 			}
 		}
-		
 
+		float w = rectDimensions.width();
+		
 		// perform self motion
 		if (v0 != 0 && vC != 0)
 		{
@@ -585,12 +581,12 @@ public class SlideShowSwipe extends View {
 			if ((vC < 0 && v0 > 0) || (vC > 0 && v0 < 0)){ 
 	
 				// correct image position on motion stop
-				if (v0 < 0 && deltaX < -0.5 * rectDimensions.width() && deltaX > -1.5 * rectDimensions.width()){
-					deltaX = -rectDimensions.width();
-					deltaXPrec = -rectDimensions.width();
-				} else if (v0 > 0 && deltaX > 0.5 * rectDimensions.width() && deltaX < 1.5 * rectDimensions.width()){
-					deltaX = rectDimensions.width();
-					deltaXPrec = rectDimensions.width();
+				if (v0 < 0 && deltaX < -0.5 * w && deltaX > -1.5 * w){
+					deltaX = -w;
+					deltaXPrec = -w;
+				} else if (v0 > 0 && deltaX > 0.5 * w && deltaX < 1.5 * w){
+					deltaX = w;
+					deltaXPrec = w;
 				} else {
 					deltaX = 0;
 					deltaXPrec = 0;
@@ -602,19 +598,19 @@ public class SlideShowSwipe extends View {
 		}
 		
 		// normalize deltas if image crossed opposite canvas border
-		while (deltaX >= rectDimensions.width()){
-			xStart += rectDimensions.width();
-			deltaXPrec -= rectDimensions.width();
-			deltaX -= rectDimensions.width();
+		while (deltaX >= w){
+			xStart += w;
+			deltaXPrec -= w;
+			deltaX -= w;
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig; 
 			undoAtZero = false;
 			bitmapChanged();
 		} 
-		while (deltaX <= -rectDimensions.width()){
-			xStart -= rectDimensions.width();
-			deltaXPrec += rectDimensions.width();
-			deltaX += rectDimensions.width();
+		while (deltaX <= -w){
+			xStart -= w;
+			deltaXPrec += w;
+			deltaX += w;
 			bitmapFront = bitmapBack;
 			rectDstFOrig = rectDstBOrig;
 			undoAtZero = false;
@@ -629,7 +625,6 @@ public class SlideShowSwipe extends View {
 			undoAtZero = false;
 		}
 		
-
 		// left side of back image crossed left border of view
 		if (deltaX > 0 && deltaXPrec <= 0){ 
         	if (bitmapFront != bitmapBack)
@@ -651,34 +646,33 @@ public class SlideShowSwipe extends View {
 
 		deltaXPrec = deltaX;
 		
+		// calculate destination rectangles
 		if (rectDstFOrig != null){
 			rectDstF.left = rectDstFOrig.left + (int)deltaX;
 			rectDstF.top = rectDstFOrig.top;
 			rectDstF.right = rectDstFOrig.right + (int)deltaX;
 			rectDstF.bottom = rectDstFOrig.bottom; 
 		}
-		
 		if (rectDstPOrig != null && timeTransitionStart.get() > 0){
 			rectDstP.left = rectDstPOrig.left + (int)deltaX;
 			rectDstP.top = rectDstPOrig.top;
 			rectDstP.right = rectDstPOrig.right + (int)deltaX;
 			rectDstP.bottom = rectDstPOrig.bottom; 
 		}
-		
 		if (rectDstBOrig != null){
 			rectDstB.left = (int)deltaX - rectDstBOrig.right;
 			rectDstB.right = (int)deltaX - rectDstBOrig.left;
 			rectDstB.top = rectDstBOrig.top;
 			rectDstB.bottom = rectDstBOrig.bottom;
 			if (deltaX < 0){
-				rectDstB.left += 2 * rectDimensions.width();
-				rectDstB.right += 2 * rectDimensions.width();
+				rectDstB.left += 2 * w;
+				rectDstB.right += 2 * w;
 			} 
 		}
 			
-
-		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / rectDimensions.width())));
-		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / rectDimensions.width()))));
+		// set alpha values to paints
+		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / w)));
+		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / w))));
 		
 		// calculate transparencies on transition
 		long tStart = timeTransitionStart.get();
@@ -712,7 +706,7 @@ public class SlideShowSwipe extends View {
 	
 	
 	/**
-	 * Notify that current displaying bitmap was changed
+	 * Notify listener that current displaying bitmap was changed
 	 */
 	private void bitmapChanged(){
 		if (stateChangeListener != null)
@@ -730,24 +724,32 @@ public class SlideShowSwipe extends View {
 	 * @return		position in coordinates of destination rectangle
 	 * @throws	NullPointerException
 	 */
-	static private Rect calculateRectDst(Bitmap b, Rect d) throws NullPointerException {
+	static public Rect calculateRectDst(Bitmap b, Rect d) throws NullPointerException {
 		if (b == null) 
 			throw new NullPointerException("Bitmap is null");
 		if (d == null)
 			throw new NullPointerException("Destination Rect object is null");
 		
 		Rect dst = new Rect();
+		
 		if ((float)b.getWidth()/(float)b.getHeight() < (float)d.width()/(float)d.height()){
-			dst.left = (int)((float)d.width() / 2f - (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
-			dst.right = (int)((float)d.width() / 2f + (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
+			dst.left = (int)((float)d.width() / 2f 
+					- (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
+			dst.right = (int)((float)d.width() / 2f 
+					+ (float)b.getWidth() * (float)d.height() / (float)b.getHeight() / 2f);
 			dst.top = 0;
 			dst.bottom = d.height();
+			
 		} else {
+			
 			dst.left = 0;
 			dst.right = d.width();
-			dst.top = (int)((float)d.height() / 2f - (float)b.getHeight() * (float)d.width() / (float)b.getWidth() / 2f);
-			dst.bottom = (int)((float)d.height() / 2f + (float)b.getHeight() * (float)d.width() / (float)b.getWidth() / 2f);
+			dst.top = (int)((float)d.height() / 2f 
+					- (float)b.getHeight() * (float)d.width() / (float)b.getWidth() / 2f);
+			dst.bottom = (int)((float)d.height() / 2f 
+					+ (float)b.getHeight() * (float)d.width() / (float)b.getWidth() / 2f);
 		}
+		
 		return dst;
 	}
 	
