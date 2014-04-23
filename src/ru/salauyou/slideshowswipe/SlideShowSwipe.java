@@ -6,6 +6,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -83,16 +84,11 @@ public class SlideShowSwipe extends View {
 	/* ===================== Publc fields ====================== */
 	
 	/**
-	 * Possible states of the view
+	 * Possible states of the slide show
 	 */
 	public enum State{ 
-		RESET, 
-		SLIDESHOW_STARTED, NEXT_SLIDE, SLIDESHOW_PAUSED, 
-		TOUCH_STARTED, TOUCH_RELEASED, 
-		MOTION_STARTED, MOTION_STOPPED; 
+		RESET, SLIDESHOW_STARTED, NEXT_SLIDE, SLIDESHOW_PAUSED; 
 	}
-
-	
 	
 	static public long PERIOD_DEFAULT = 1500L;
 	static public long TRANSITION_DEFAULT = 500L;
@@ -123,6 +119,7 @@ public class SlideShowSwipe extends View {
 		if (listener == null)
 			throw new NullPointerException("Listener is null");
 		this.stateChangeListener = listener;
+		listener.onStateChange(stateCurrent);
 		return this;
 	}
 	
@@ -186,19 +183,26 @@ public class SlideShowSwipe extends View {
 	
 	
 	/**
-	 * Starts or unpauses slideshow
+	 * Starts or unpauses slideshow, if it waw paused by {@code pauseSlideShow() or user's gesture.
+	 * After creating the view and setting bitmap container, revoke {@code startSlideShow()} 
+	 * to launch demonstration
 	 */
 	public void startSlideShow(){
-		if (pausedManually){
+		if (pausedManually || paused){
 			pausedManually = false;
-			this.invalidate();
+			if (paused && container != null && started){
+				unPause();
+			} else {
+				stateChanged(State.SLIDESHOW_STARTED);
+				this.invalidate();
+			}
 		}
 	}
 	
 	
 	
 	/**
-	 * Forces slideshow to pause. Clicks on the view will not unpause slideshow
+	 * Forces slideshow to pause. Clicks on the view will not resume slideshow demonstration
 	 * until {@code startSlideShow()} is invoked
 	 */
 	public void pauseSlideShow(){
@@ -302,8 +306,7 @@ public class SlideShowSwipe extends View {
 				pause();
 				pausedNow = true;
 			}
-				
-			stateChanged(State.TOUCH_STARTED);
+			
 			
 		} else if (e.getAction() == MotionEvent.ACTION_MOVE) {
 		
@@ -377,9 +380,6 @@ public class SlideShowSwipe extends View {
 			v0 = Math.signum(v0) * (float) Math.sqrt(Math.abs(2.0 * kV * xEnd));
 			vC = v0;
 			xCPrec = 0;
-			
-			stateChanged(State.TOUCH_RELEASED);
-			stateChanged(State.MOTION_STARTED);
 			
 			// small movement treated as touch unpauses slideshow
 			if (touchPath <= touchMoveThreshold && !pausedManually && paused && !pausedNow
@@ -469,6 +469,7 @@ public class SlideShowSwipe extends View {
 	/**
 	 * Runs new thread to get the first non-null bitmap from the container
 	 */
+	
 	private void getFirstBitmap(){
 
 		if (container.getBitmapCurrent() == null){
@@ -506,8 +507,8 @@ public class SlideShowSwipe extends View {
 	 * Pauses slide show
 	 */
 	private void pause(){
-		if (!paused && scheduler != null){
-			paused = true;
+		paused = true;
+		if (scheduler != null){
 			((ScheduledExecutorService)scheduler).shutdown();
 			scheduler = null;
 		}
@@ -620,7 +621,6 @@ public class SlideShowSwipe extends View {
 				}
 				vC = 0;
 				v0 = 0;
-				stateChanged(State.MOTION_STOPPED);
 			}
 		}
 		

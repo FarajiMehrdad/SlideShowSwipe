@@ -45,10 +45,10 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		
 		
 		((SlideShowSwipe)findViewById(R.id.slide_show))
-		.setOnStateChangeListener(self)
 		.setBitmapContainer(self)
-		.setSlideShowPeriod(1200)
-		.setSlideShowTransition(600)
+		.setOnStateChangeListener(self)
+		.setSlideShowPeriod(2000)
+		.setSlideShowTransition(1000)
 		.startSlideShow();
 		
 		
@@ -56,7 +56,7 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		viewControl.setOnClickListener(new OnClickListener(){
 			@Override
 			public void onClick(View v) {
-				((SlideShowSwipe)findViewById(R.id.slide_show)).setBitmapContainer(self).startSlideShow();
+				((SlideShowSwipe)findViewById(R.id.slide_show)).startSlideShow();
 			}
 		});
 		
@@ -111,13 +111,7 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 	
 	@Override
 	public void onStateChange(State s) {
-		switch (s){
-		case SLIDESHOW_PAUSED :
-		case SLIDESHOW_STARTED :
-		case NEXT_SLIDE :
-			Log.d("debug", s.toString());
-			break;
-		}
+		Log.d("debug", s.toString());
 	}
 
 	@Override
