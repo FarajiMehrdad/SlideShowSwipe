@@ -26,6 +26,7 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 	int posCurrent = 0;
 	int posPrec = 0;
 	
+	ActivityMain self = this;
 	
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -44,18 +45,18 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 		
 		
 		((SlideShowSwipe)findViewById(R.id.slide_show))
-			.setOnStateChangeListener(this)
-			.setBitmapContainer(this)
-			.setSlideShowPeriod(1200)
-			.setSlideShowTransition(600)
-			.startSlideShow();
-
+		.setOnStateChangeListener(self)
+		.setBitmapContainer(self)
+		.setSlideShowPeriod(1200)
+		.setSlideShowTransition(600)
+		.startSlideShow();
+		
 		
 		viewControl = (ImageView)findViewById(R.id.view_control);
 		viewControl.setOnClickListener(new OnClickListener(){
 			@Override
 			public void onClick(View v) {
-				
+				((SlideShowSwipe)findViewById(R.id.slide_show)).setBitmapContainer(self).startSlideShow();
 			}
 		});
 		
@@ -121,7 +122,7 @@ public class ActivityMain extends Activity implements SlideShowSwipe.BitmapConta
 
 	@Override
 	public void onCurrentBitmapChange() {
-		viewControl.setImageBitmap(this.getBitmapCurrent());
+		//viewControl.setImageBitmap(this.getBitmapCurrent());
 	}
 
 }
