@@ -6,7 +6,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -119,7 +118,6 @@ public class SlideShowSwipe extends View {
 		if (listener == null)
 			throw new NullPointerException("Listener is null");
 		this.stateChangeListener = listener;
-		listener.onStateChange(stateCurrent);
 		return this;
 	}
 	
@@ -213,6 +211,31 @@ public class SlideShowSwipe extends View {
 	}
 	
 	
+	/**
+	 * Restores slideshow to demonstrate the current bitmap. It must not be null.
+	 * To make the view wait for non-null current bitmap, use {@code startSlideShow()} instead
+	 * 
+	 * @param paused	if slideshow demonstration should be paused
+	 * @throws NullPointerException		if bitmap container or current bitmap is null
+	 */
+	public void restoreCurrent(boolean paused) throws NullPointerException{
+		if (container == null)
+			throw new NullPointerException("Container is null");
+		if (container.getBitmapCurrent() == null)
+			throw new NullPointerException("Current bitmap is null");
+		
+		bitmapPrec = bitmapFront = container.getBitmapCurrent();
+		
+		started = true;
+		pausedManually = false;
+		if (paused)
+			pause();
+		else
+			unPause();
+		
+		this.invalidate();
+	}
+	
 	
 	/* ============== Constructors inherited from View ================ */
 	
@@ -249,9 +272,9 @@ public class SlideShowSwipe extends View {
 	private Rect rectDstB = new Rect(); // destination rect of 'back' bitmap (i. e. that which is partially viewed on swipe)
 	private Rect rectDstP = new Rect(); // destination rect of 'preceding' bitmap (i. e. that which fades out during slideshow transition)
 
-	private Paint paintAlphaF = new Paint();
-	private Paint paintAlphaB = new Paint();
-	private Paint paintAlphaP = new Paint();
+	private Paint paintAlphaF = new Paint(Paint.FILTER_BITMAP_FLAG);
+	private Paint paintAlphaB = new Paint(Paint.FILTER_BITMAP_FLAG);
+	private Paint paintAlphaP = new Paint(Paint.FILTER_BITMAP_FLAG);
 	
 	private volatile boolean firstBitmapRequested = false;
 	private boolean started = false; // indicates if slide show was started (i. e. bitmaps != null)
@@ -288,107 +311,109 @@ public class SlideShowSwipe extends View {
 	@Override
 	public boolean onTouchEvent(MotionEvent e){
 		super.onTouchEvent(e);
-		if (e.getAction() == MotionEvent.ACTION_DOWN){
+		if (started){
+			if (e.getAction() == MotionEvent.ACTION_DOWN){
 			
-			v0 = 0;
-			vC = 0;
+				v0 = 0;
+				vC = 0;
 			
-			xStartRaw = e.getRawX();
-			yStartRaw = e.getRawY();
-			
-			xStart = e.getRawX() - deltaX;
-			timeTouchStart = timeStartRaw = System.currentTimeMillis();
-			
-			touchPath = 0;
-			
-			// pause slideshow if needed
-			if (!paused && !pausedManually){
-				pause();
-				pausedNow = true;
-			}
-			
-			
-		} else if (e.getAction() == MotionEvent.ACTION_MOVE) {
-		
-			deltaX = e.getRawX() - xStart;
-			float dt = (float)(System.currentTimeMillis() - timeTouchStart) / 1000f;
-			
-			// threshold to avoid very small dt 
-			if (dt > 0.02){
-				v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
 				xStartRaw = e.getRawX();
-				timeTouchStart = System.currentTimeMillis();
-			}
+				yStartRaw = e.getRawY();
 			
-			// calculate path of touch--this is needed to recognize clicks
-			touchPath += Math.hypot(e.getRawX() - xStartRaw, e.getRawY() - yStartRaw);
+				xStart = e.getRawX() - deltaX;
+				timeTouchStart = timeStartRaw = System.currentTimeMillis();
 			
-		    self.invalidate();
+				touchPath = 0;
+			
+				// pause slideshow if needed
+				if (!paused && !pausedManually){
+					pause();
+					pausedNow = true;
+				}
+			
+			
+			} else if (e.getAction() == MotionEvent.ACTION_MOVE) {
+		
+				deltaX = e.getRawX() - xStart;
+				float dt = (float)(System.currentTimeMillis() - timeTouchStart) / 1000f;
+			
+				// threshold to avoid very small dt 
+				if (dt > 0.02){
+					v0 = v0 * 0.25f + 0.75f * (e.getRawX() - xStartRaw) / dt;
+					xStartRaw = e.getRawX();
+					timeTouchStart = System.currentTimeMillis();
+				}
+			
+				// calculate path of touch--this is needed to recognize clicks
+				touchPath += Math.hypot(e.getRawX() - xStartRaw, e.getRawY() - yStartRaw);
+			
+				self.invalidate();
 		    
-		} else if (e.getAction() == MotionEvent.ACTION_UP){
+			} else if (e.getAction() == MotionEvent.ACTION_UP){
 			
-			timeTouchStart = System.currentTimeMillis();
+				timeTouchStart = System.currentTimeMillis();
 			
-			// correct deceleration coefficient sign
-			kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
+				// correct deceleration coefficient sign
+				kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
 			
-			// correct start velocity
-			// calculate the x point where self motion will stop
-			double xEnd = v0 * v0 / 2f / kV;
+				// correct start velocity
+				// calculate the x point where self motion will stop
+				double xEnd = v0 * v0 / 2f / kV;
 			
-			// swipe not strong enough to launch motion
-			if (Math.abs(xEnd) < rectDimensions.width() / 2){ 
+				// swipe not strong enough to launch motion
+				if (Math.abs(xEnd) < rectDimensions.width() / 2){ 
 				
-				// but strong enough to switch photo?
-				boolean strong = Math.abs(xEnd) >= rectDimensions.width() / 4; 
-				float w = rectDimensions.width();
+					// but strong enough to switch photo?
+					boolean strong = Math.abs(xEnd) >= rectDimensions.width() / 4; 
+					float w = rectDimensions.width();
 				
-				if (deltaX >= 0 && deltaX < w / 2 ){
-					if (strong){
+					if (deltaX >= 0 && deltaX < w / 2 ){
+						if (strong){
+							xEnd = w - deltaX;
+							v0 = +1;
+						} else {
+							xEnd = -deltaX;
+							v0 = -1;	
+						}
+					} else if (deltaX < 0 && deltaX > -w / 2){
+						if (strong){
+							xEnd = w + deltaX;
+							v0 = -1;
+						} else {
+							xEnd = -deltaX;
+							v0 = +1;
+						}
+					} else if (deltaX >= 0 && deltaX >= w / 2){
 						xEnd = w - deltaX;
-						v0 = +1;
-					} else {
-						xEnd = -deltaX;
-						v0 = -1;	
-					}
-				} else if (deltaX < 0 && deltaX > -w / 2){
-					if (strong){
-						xEnd = w + deltaX;
-						v0 = -1;
-					} else {
-						xEnd = -deltaX;
-						v0 = +1;
-					}
-				} else if (deltaX >= 0 && deltaX >= w / 2){
-					xEnd = w - deltaX;
-					v0 = +1;		
-				} else if (deltaX < 0 && deltaX < -w / 2){						
-					xEnd = -w - deltaX;
-					v0 = -1;			
-				} 
+						v0 = +1;		
+					} else if (deltaX < 0 && deltaX < -w / 2){						
+						xEnd = -w - deltaX;
+						v0 = -1;			
+					} 
 				
-			} else {
-				// correct ending point such that motion will stop when full image is displayed
-				xEnd = Math.round((xEnd + deltaX)/rectDimensions.width()) 
-						* rectDimensions.width() - deltaX;
+				} else {
+					// correct ending point such that motion will stop when full image is displayed
+					xEnd = Math.round((xEnd + deltaX)/rectDimensions.width()) 
+							* rectDimensions.width() - deltaX;
+				}
+			
+				// correct deceleration coefficient sign
+				kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
+			
+				// calculate corrected velocity 
+				v0 = Math.signum(v0) * (float) Math.sqrt(Math.abs(2.0 * kV * xEnd));
+				vC = v0;
+				xCPrec = 0;
+			
+				// small movement treated as touch unpauses slideshow
+				if (touchPath <= touchMoveThreshold && !pausedManually && paused && !pausedNow
+						&& System.currentTimeMillis() - timeStartRaw <= touchTimeThreshold)			
+					unPause();
+				else 
+					pausedNow = false;
+			
+				self.invalidate();
 			}
-			
-			// correct deceleration coefficient sign
-			kV = v0 > 0 ? +Math.abs(kV) : -Math.abs(kV);
-			
-			// calculate corrected velocity 
-			v0 = Math.signum(v0) * (float) Math.sqrt(Math.abs(2.0 * kV * xEnd));
-			vC = v0;
-			xCPrec = 0;
-			
-			// small movement treated as touch unpauses slideshow
-			if (touchPath <= touchMoveThreshold && !pausedManually && paused && !pausedNow
-					&& System.currentTimeMillis() - timeStartRaw <= touchTimeThreshold)			
-				unPause();
-			else 
-				pausedNow = false;
-			
-			self.invalidate();
 		}
 		return true;
 	}
@@ -570,6 +595,11 @@ public class SlideShowSwipe extends View {
 	 */
 	private void makeCalculations(){
 		
+		// special case: calculate destination rect in case of restoring slide show position
+		if (bitmapFront != null && rectDstFOrig == null)
+			rectDstFOrig = calculateRectDst(bitmapFront, rectDimensions);
+	
+		
 		// first call
 		if (!started){
 			if (bitmapFront != null)
@@ -698,8 +728,8 @@ public class SlideShowSwipe extends View {
 		}
 			
 		// set alpha values to paints
-		paintAlphaB.setAlpha((int) (255f * Math.abs(deltaX / w)));
-		paintAlphaF.setAlpha((int) (255f * (1f - Math.abs(deltaX / w))));
+		paintAlphaB.setAlpha((int) (127f + 128f * Math.abs(deltaX / w)));
+		paintAlphaF.setAlpha((int) (127f + 128f * (1f - Math.abs(deltaX / w))));
 		
 		// calculate transparencies on transition
 		long tStart = timeTransitionStart.get();
